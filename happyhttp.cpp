@@ -386,7 +386,7 @@ Error Connection::putheader( const char* header, int numericvalue )
 Error Connection::endheaders()
 {
   if( m_State != REQ_STARTED )
-    throw NewError( "Cannot send header" );
+    return NewError( "Cannot send header" );
   m_State = IDLE;
 
   m_Buffer.push_back( "" );
