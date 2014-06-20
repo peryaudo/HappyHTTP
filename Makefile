@@ -3,7 +3,7 @@
 EXE = test
 SRCS = test.cpp happyhttp.cpp
 
-CXXFLAGS = -ggdb
+CXXFLAGS = -ggdb -Wall
 LDFLAGS =
 
 ifdef WIN32

@@ -43,11 +43,12 @@ struct in_addr;
 namespace happyhttp
 {
 
+typedef std::string* Error;
 
 class Response;
 
 // Helper Functions
-void BailOnSocketError( const char* context );
+Error BailOnSocketError( const char* context );
 struct in_addr *atoaddr( const char* address);
 
 
@@ -118,23 +119,6 @@ enum {
 	NOT_EXTENDED = 510,
 };
 
-
-
-// Exception class
-
-class Wobbly
-{
-public:
-	Wobbly( const char* fmt, ... );
-	const char* what() const
-		{ return m_Message; }
-protected:
-	enum { MAXLEN=256 };
-	char m_Message[ MAXLEN ];
-};
-
-
-
 //-------------------------------------------------
 // Connection
 //
@@ -166,14 +150,14 @@ public:
 	// call it automatically if needed.
 	// But it could block (for name lookup etc), so you might prefer to
 	// call it in advance.
-	void connect();
+	Error connect();
 
 	// close connection, discarding any pending requests.
 	void close();
 
 	// Update the connection (non-blocking)
 	// Just keep calling this regularly to service outstanding requests.
-	void pump();
+	Error pump();
 
 	// any requests still outstanding?
 	bool outstanding() const
@@ -187,7 +171,7 @@ public:
 	// url is only path part: eg  "/index.html"
 	// headers is array of name/value pairs, terminated by a null-ptr
 	// body & bodysize specify body data of request (eg values for a form)
-	void request( const char* method, const char* url, const char* headers[]=0,
+	Error request( const char* method, const char* url, const char* headers[]=0,
 		const unsigned char* body=0, int bodysize=0 );
 
 	// ---------------------------
@@ -197,18 +181,18 @@ public:
 	// begin request
 	// method is "GET", "POST" etc...
 	// url is only path part: eg  "/index.html"
-	void putrequest( const char* method, const char* url );
+	Error putrequest( const char* method, const char* url );
 
 	// Add a header to the request (call after putrequest() )
-	void putheader( const char* header, const char* value );
-	void putheader( const char* header, int numericvalue );	// alternate version
+	Error putheader( const char* header, const char* value );
+	Error putheader( const char* header, int numericvalue );	// alternate version
 
 	// Finished adding headers, issue the request.
-	void endheaders();
+	Error endheaders();
 
 	// send body data if any.
 	// To be called after endheaders()
-	void send( const unsigned char* buf, int numbytes );
+	Error send( const unsigned char* buf, int numbytes );
 
 protected:
 	// some bits of implementation exposed to Response class
@@ -271,10 +255,10 @@ protected:
 	// pump some data in for processing.
 	// Returns the number of bytes used.
 	// Will always return 0 when response is complete.
-	int pump( const unsigned char* data, int datasize );
+	int pump( const unsigned char* data, int datasize, Error& err );
 
 	// tell response that connection has closed
-	void notifyconnectionclosed();
+	Error notifyconnectionclosed();
 
 private:
 	enum {
@@ -310,7 +294,7 @@ private:
 
 
 	void FlushHeader();
-	void ProcessStatusLine( std::string const& line );
+	Error ProcessStatusLine( std::string const& line );
 	void ProcessHeaderLine( std::string const& line );
 	void ProcessTrailerLine( std::string const& line );
 	void ProcessChunkLenLine( std::string const& line );
@@ -322,8 +306,6 @@ private:
 	bool CheckClose();
 	void Finish();
 };
-
-
 
 }	// end namespace happyhttp
 

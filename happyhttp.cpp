@@ -43,7 +43,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdarg>
-#include <assert.h>
+#include <cassert>
 
 #include <string>
 #include <vector>
@@ -70,9 +70,21 @@ const char* GetWinsockErrorString( int err );
 // Helper functions
 //---------------------------------------------------------------------
 
+Error NewError(const char* fmt, ...)
+{
+  const int MAXLEN = 256;
+  char message[MAXLEN];
+	va_list ap;
+	va_start(ap, fmt);
+	int n = vsnprintf(message, MAXLEN, fmt, ap);
+	va_end(ap);
+	if(n == MAXLEN)
+		message[MAXLEN - 1] = '\0';
 
+  return new string(message);
+}
 
-void BailOnSocketError( const char* context )
+Error BailOnSocketError( const char* context )
 {
 #ifdef WIN32
 
@@ -81,7 +93,7 @@ void BailOnSocketError( const char* context )
 #else
 	const char* msg = strerror( errno );
 #endif
-	throw Wobbly( "%s: %s", context, msg );
+	return NewError( "%s: %s", context, msg );
 }
 
 
@@ -150,7 +162,7 @@ const char* GetWinsockErrorString( int err )
 
 
 // return true if socket has data waiting to be read
-bool datawaiting( int sock )
+bool datawaiting( int sock, Error& err)
 {
 	fd_set fds;
 	FD_ZERO( &fds );
@@ -161,8 +173,10 @@ bool datawaiting( int sock )
 	tv.tv_usec = 0;
 
 	int r = select( sock+1, &fds, NULL, NULL, &tv);
-	if (r < 0)
-		BailOnSocketError( "select" );
+	if (r < 0) {
+		err = BailOnSocketError( "select" );
+    return false;
+  }
 
 	if( FD_ISSET( sock, &fds ) )
 		return true;
@@ -189,36 +203,6 @@ struct in_addr *atoaddr( const char* address)
 
 	return 0;
 }
-
-
-
-
-
-
-
-//---------------------------------------------------------------------
-//
-// Exception class
-//
-//---------------------------------------------------------------------
-
-
-Wobbly::Wobbly( const char* fmt, ... )
-{
-	va_list ap;
-	va_start( ap,fmt);
-	int n = vsnprintf( m_Message, MAXLEN, fmt, ap );
-	va_end( ap );
-	if(n==MAXLEN)
-		m_Message[MAXLEN-1] = '\0';
-}
-
-
-
-
-
-
-
 
 //---------------------------------------------------------------------
 //
@@ -251,11 +235,11 @@ void Connection::setcallbacks(
 }
 
 
-void Connection::connect()
+Error Connection::connect()
 {
 	in_addr* addr = atoaddr( m_Host.c_str() );
 	if( !addr )
-		throw Wobbly( "Invalid network address" );
+		return NewError( "Invalid network address" );
 
 	sockaddr_in address;
 	memset( (char*)&address, 0, sizeof(address) );
@@ -265,12 +249,14 @@ void Connection::connect()
 
 	m_Sock = socket( AF_INET, SOCK_STREAM, 0 );
 	if( m_Sock < 0 )
-		BailOnSocketError( "socket()" );
+		return BailOnSocketError( "socket()" );
 
 //	printf("Connecting to %s on port %d.\n",inet_ntoa(*addr), port);
 
 	if( ::connect( m_Sock, (sockaddr const*)&address, sizeof(address) ) < 0 )
-		BailOnSocketError( "connect()" );
+		return BailOnSocketError( "connect()" );
+
+  return NULL;
 }
 
 
@@ -299,7 +285,7 @@ Connection::~Connection()
 	close();
 }
 
-void Connection::request( const char* method,
+Error Connection::request( const char* method,
 	const char* url,
 	const char* headers[],
 	const unsigned char* body,
@@ -325,7 +311,9 @@ void Connection::request( const char* method,
 		}
 	}
 
-	putrequest( method, url );
+	if (Error err = putrequest( method, url )) {
+    return err;
+  }
 
 	if( body && !gotcontentlength )
 		putheader( "Content-Length", bodysize );
@@ -340,20 +328,26 @@ void Connection::request( const char* method,
 			putheader( name, value );
 		}
 	}
-	endheaders();
+	if (Error err = endheaders()) {
+    return err;
+  }
 
-	if( body )
-		send( body, bodysize );
+	if( body ) {
+		if (Error err = send( body, bodysize )) {
+      return err;
+    }
+  }
 
+  return NULL;
 }
 
 
 
 
-void Connection::putrequest( const char* method, const char* url )
+Error Connection::putrequest( const char* method, const char* url )
 {
 	if( m_State != IDLE )
-		throw Wobbly( "Request already issued" );
+		return NewError( "Request already issued" );
 
 	m_State = REQ_STARTED;
 
@@ -369,27 +363,30 @@ void Connection::putrequest( const char* method, const char* url )
 	// Push a new response onto the queue
 	Response *r = new Response( method, *this );
 	m_Outstanding.push_back( r );
+
+  return NULL;
 }
 
 
-void Connection::putheader( const char* header, const char* value )
+Error Connection::putheader( const char* header, const char* value )
 {
 	if( m_State != REQ_STARTED )
-		throw Wobbly( "putheader() failed" );
+		return NewError( "putheader() failed" );
 	m_Buffer.push_back( string(header) + ": " + string( value ) );
+  return NULL;
 }
 
-void Connection::putheader( const char* header, int numericvalue )
+Error Connection::putheader( const char* header, int numericvalue )
 {
 	char buf[32];
 	sprintf( buf, "%d", numericvalue );
-	putheader( header, buf );
+	return putheader( header, buf );
 }
 
-void Connection::endheaders()
+Error Connection::endheaders()
 {
 	if( m_State != REQ_STARTED )
-		throw Wobbly( "Cannot send header" );
+		throw NewError( "Cannot send header" );
 	m_State = IDLE;
 
 	m_Buffer.push_back( "" );
@@ -403,16 +400,21 @@ void Connection::endheaders()
 
 //	printf( "%s", msg.c_str() );
 	send( (const unsigned char*)msg.c_str(), msg.size() );
+
+  return NULL;
 }
 
 
 
-void Connection::send( const unsigned char* buf, int numbytes )
+Error Connection::send( const unsigned char* buf, int numbytes )
 {
 //	fwrite( buf, 1,numbytes, stdout );
 	
-	if( m_Sock < 0 )
-		connect();
+	if( m_Sock < 0 ) {
+		if (Error err = connect()) {
+      return err;
+    }
+  }
 
 	while( numbytes > 0 )
 	{
@@ -422,34 +424,45 @@ void Connection::send( const unsigned char* buf, int numbytes )
 		int n = ::send( m_Sock, buf, numbytes, 0 );
 #endif
 		if( n<0 )
-			BailOnSocketError( "send()" );
+			return BailOnSocketError( "send()" );
 		numbytes -= n;
 		buf += n;
 	}
+
+  return NULL;
 }
 
 
-void Connection::pump()
+Error Connection::pump()
 {
 	if( m_Outstanding.empty() )
-		return;		// no requests outstanding
+		return NULL;		// no requests outstanding
 
 	assert( m_Sock >0 );	// outstanding requests but no connection!
 
-	if( !datawaiting( m_Sock ) )
-		return;				// recv will block
+  {
+    Error err = NULL;
+    bool res;
+    res = datawaiting(m_Sock, err);
+    if (err)
+      return err;
+    if(!res)
+		return NULL;				// recv will block
+  }
 
 	unsigned char buf[ 2048 ];
 	int a = recv( m_Sock, (char*)buf, sizeof(buf), 0 );
 	if( a<0 )
-		BailOnSocketError( "recv()" );
+		return BailOnSocketError( "recv()" );
 
 	if( a== 0 )
 	{
 		// connection has closed
 
 		Response* r = m_Outstanding.front();
-		r->notifyconnectionclosed();
+		if (Error err = r->notifyconnectionclosed()) {
+      return err;
+    }
 		assert( r->completed() );
 		delete r;
 		m_Outstanding.pop_front();
@@ -464,7 +477,10 @@ void Connection::pump()
 		{
 
 			Response* r = m_Outstanding.front();
-			int u = r->pump( &buf[used], a-used );
+      Error err;
+			int u = r->pump( &buf[used], a-used, err );
+      if (err)
+        return err;
 
 			// delete response once completed
 			if( r->completed() )
@@ -480,6 +496,8 @@ void Connection::pump()
 		// anything outstanding anyway)
 		assert( used == a );	// all bytes should be used up by here.
 	}
+
+  return NULL;
 }
 
 
@@ -544,10 +562,10 @@ const char* Response::getreason() const
 
 
 // Connection has closed
-void Response::notifyconnectionclosed()
+Error Response::notifyconnectionclosed()
 {
 	if( m_State == COMPLETE )
-		return;
+    return NULL;
 
 	// eof can be valid...
 	if( m_State == BODY &&
@@ -558,13 +576,15 @@ void Response::notifyconnectionclosed()
 	}
 	else
 	{
-		throw Wobbly( "Connection closed unexpectedly" );
+		return NewError( "Connection closed unexpectedly" );
 	}
+
+  return NULL;
 }
 
 
 
-int Response::pump( const unsigned char* data, int datasize )
+int Response::pump( const unsigned char* data, int datasize, Error& err )
 {
 	assert( datasize != 0 );
 	int count = datasize;
@@ -588,7 +608,9 @@ int Response::pump( const unsigned char* data, int datasize )
 					switch( m_State )
 					{
 						case STATUSLINE:
-							ProcessStatusLine( m_LineBuf );
+							if ((err = ProcessStatusLine( m_LineBuf ))) {
+                return 0;
+              }
 							break;
 						case HEADERS:
 							ProcessHeaderLine( m_LineBuf );
@@ -716,7 +738,7 @@ void Response::Finish()
 }
 
 
-void Response::ProcessStatusLine( std::string const& line )
+Error Response::ProcessStatusLine( std::string const& line )
 {
 	const char* p = line.c_str();
 
@@ -743,7 +765,7 @@ void Response::ProcessStatusLine( std::string const& line )
 
 	m_Status = atoi( status.c_str() );
 	if( m_Status < 100 || m_Status > 999 )
-		throw Wobbly( "BadStatusLine (%s)", line.c_str() );
+		return NewError( "BadStatusLine (%s)", line.c_str() );
 
 /*
 	printf( "version: '%s'\n", m_VersionString.c_str() );
@@ -756,13 +778,15 @@ void Response::ProcessStatusLine( std::string const& line )
 	else if( 0==m_VersionString.compare( 0,7,"HTTP/1." ) )
 		m_Version = 11;
 	else
-		throw Wobbly( "UnknownProtocol (%s)", m_VersionString.c_str() );
+		return NewError( "UnknownProtocol (%s)", m_VersionString.c_str() );
 	// TODO: support for HTTP/0.9
 
 	
 	// OK, now we expect headers!
 	m_State = HEADERS;
 	m_HeaderAccum.clear();
+
+  return NULL;
 }
 
 

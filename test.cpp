@@ -27,22 +27,29 @@ void OnComplete( const happyhttp::Response* r, void* userdata )
 
 
 
-void Test1()
+happyhttp::Error Test1()
 {
 	puts("-----------------Test1------------------------" );
 	// simple simple GET
 	happyhttp::Connection conn( "scumways.com", 80 );
 	conn.setcallbacks( OnBegin, OnData, OnComplete, 0 );
 
-	conn.request( "GET", "/happyhttp/test.php", 0, 0,0 );
+	if (happyhttp::Error err = conn.request( "GET", "/happyhttp/test.php", 0, 0,0 )) {
+    return err;
+  }
 
-	while( conn.outstanding() )
-		conn.pump();
+	while( conn.outstanding() ) {
+		if (happyhttp::Error err = conn.pump()) {
+      return err;
+    }
+  }
+
+  return NULL;
 }
 
 
 
-void Test2()
+happyhttp::Error Test2()
 {
 	puts("-----------------Test2------------------------" );
 	// POST using high-level request interface
@@ -59,17 +66,24 @@ void Test2()
 	
 	happyhttp::Connection conn( "scumways.com", 80 );
 	conn.setcallbacks( OnBegin, OnData, OnComplete, 0 );
-	conn.request( "POST",
+	if (happyhttp::Error err = conn.request( "POST",
 			"/happyhttp/test.php",
 			headers,
 			(const unsigned char*)body,
-			strlen(body) );
+			strlen(body) )) {
+    return err;
+  }
 
-	while( conn.outstanding() )
-		conn.pump();
+	while( conn.outstanding() ) {
+		if (happyhttp::Error err = conn.pump()) {
+      return err;
+    }
+  }
+
+  return NULL;
 }
 
-void Test3()
+happyhttp::Error Test3()
 {
 	puts("-----------------Test3------------------------" );
 	// POST example using lower-level interface
@@ -80,16 +94,18 @@ void Test3()
 	happyhttp::Connection conn( "scumways.com", 80 );
 	conn.setcallbacks( OnBegin, OnData, OnComplete, 0 );
 
-	conn.putrequest( "POST", "/happyhttp/test.php" );
-	conn.putheader( "Connection", "close" );
-	conn.putheader( "Content-Length", l );
-	conn.putheader( "Content-type", "application/x-www-form-urlencoded" );
-	conn.putheader( "Accept", "text/plain" );
-	conn.endheaders();
-	conn.send( (const unsigned char*)params, l );
+	if (happyhttp::Error err = conn.putrequest( "POST", "/happyhttp/test.php" )) return err;
+	if (happyhttp::Error err = conn.putheader( "Connection", "close" )) return err;
+	if (happyhttp::Error err = conn.putheader( "Content-Length", l )) return err;
+	if (happyhttp::Error err = conn.putheader( "Content-type", "application/x-www-form-urlencoded" )) return err;
+	if (happyhttp::Error err = conn.putheader( "Accept", "text/plain" )) return err;
+	if (happyhttp::Error err = conn.endheaders()) return err;
+	if (happyhttp::Error err = conn.send( (const unsigned char*)params, l )) return err;
 
-	while( conn.outstanding() )
-		conn.pump();
+	while( conn.outstanding() ) {
+		if (happyhttp::Error err = conn.pump()) return err;
+  }
+  return NULL;
 }
 
 
@@ -106,22 +122,18 @@ int main( int argc, char* argv[] )
 		return 0;
 	}
 #endif //WIN32
-	try
-	{
-		Test1();
-		Test2();
-		Test3();
-	}
+  happyhttp::Error err = NULL;
+  if ((err = Test1())) { }
+  else if ((err = Test2())) { }
+  else if ((err = Test3())) { }
 
-	catch( happyhttp::Wobbly& e )
-	{
-		fprintf(stderr, "Exception:\n%s\n", e.what() );
+  if (err) {
+    fprintf(stderr, "Error: %s\n", err->c_str());
 	}
 	
 #ifdef WIN32
     WSACleanup();
 #endif // WIN32
-
 	return 0;
 }
 
